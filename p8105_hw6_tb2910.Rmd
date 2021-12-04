@@ -14,7 +14,7 @@ library(modelr)
 library(patchwork)
 ```
 
-  read_csv("./homicide-data.csv", na = c("","Unknown")) %>% 
+
 ## Question 1 
 ```{r, message=FALSE}
 birthweight_df = 
@@ -109,3 +109,85 @@ crossvalidate_df %>%
   theme(plot.title = element_text(hjust = 0.5))
 ```
 We see that our proposed model and the suggested model with predictors head circumference, birth length, sex, and all interaction terms have similar root mean squared error. However, the suggested model with predictors birth length and gestational age without interaction term has the highest root mean squared error among the three models.
+
+
+## Question 2
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+
+##### Use 5000 bootstrap samples and for sample produce estimates of r hat sqaure and log($\hat\beta_0$ * $\hat\beta_1$)
+
+```{r}
+weather_bootstrap = 
+  weather_df %>% 
+  select(tmax, tmin) %>% 
+  bootstrap(n = 5000, id = "strap_number") %>%
+  mutate(
+    models = map(.x = strap, ~lm(tmax ~ tmin, data = .x)),
+    results_coeff = map(models, broom::tidy),
+    results_rsquare = map(models, broom::glance)
+  ) %>% 
+  select(strap_number, results_coeff, results_rsquare) %>% 
+  unnest(results_coeff) %>% 
+  select(strap_number,term, estimate, results_rsquare) %>% 
+  unnest(results_rsquare) %>% 
+  select(strap_number, term, estimate, r.squared)
+```
+
+```{r}
+beta0_df = 
+  weather_bootstrap %>% 
+  filter(term == "(Intercept)") %>% 
+  select(strap_number, estimate) %>% 
+  rename(beta0 = estimate)
+beta1_df = 
+  weather_bootstrap %>% 
+  filter(term == "tmin") %>%
+  select(strap_number,estimate) %>% 
+  rename(beta1 = estimate)
+betas_df = 
+  inner_join(beta0_df, beta1_df, by = "strap_number") %>% 
+  mutate(log_beta = log(beta0*beta1))
+betas_df %>% 
+  ggplot(aes(log_beta)) +
+  geom_density()
+```
+
+Overall we see that The distribution of log($\hat\beta_0$ * $\hat\beta_1$) looks fairly normally distributed.
+
+
+##### We can now identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for log($\hat\beta_0$ * $\hat\beta_1$)
+```{r}
+quantile(betas_df$log_beta, c(.025, 0.975)) 
+```
+Our results show that the 95% confidence interval for log($\hat\beta_0$ * $\hat\beta_1$) is (1.96, 2.05).
+
+##### We will repeat the same proccess for r hat sqaure
+```{r}
+rsquare_df = 
+  weather_bootstrap %>% 
+  select(strap_number, r.squared) %>% 
+  distinct(strap_number, .keep_all = TRUE)
+rsquare_df %>% 
+  ggplot(aes(r.squared)) +
+  geom_density()
+```
+The distribution of r hat square looks fairly normal but with a slightly left-skewness. 
+
+```{r}
+quantile(rsquare_df$r.squared, c(.025, 0.975)) 
+```
+Our results show that the 95% confidence interval for r hat square is (0.89, 0.92).
+
