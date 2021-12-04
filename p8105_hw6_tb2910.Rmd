@@ -14,4 +14,98 @@ library(modelr)
 library(patchwork)
 ```
 
+  read_csv("./homicide-data.csv", na = c("","Unknown")) %>% 
 ## Question 1 
+```{r, message=FALSE}
+birthweight_df = 
+  read_csv("./birthweight.csv") %>% 
+  mutate(babysex = factor(babysex),
+         frace = factor(frace),
+         malform = factor(malform),
+         mrace = factor(mrace)) %>% 
+  mutate(bwt = bwt*0.00220462)
+  birthweight_df %>% 
+  skimr::skim()
+```
+From the summary statistics provided by skimr, we see that there are no missing data.
+
+To predict the best model to use in this scenario, we can first start by computing the pearson correlation coefficient between each variable and birth weight.
+```{r warning=FALSE}
+birthweight_df %>%
+  map(~cor(as.numeric(.x), pull(birthweight_df, bwt), method = "pearson")) %>%
+  as_tibble() %>%
+  pivot_longer(babysex:wtgain,
+               names_to = "variables",
+               values_to = "r") %>%
+  knitr::kable()
+```
+From this analysis, we can see that `bhead` (baby's head circumference) and `blength` (baby's length at birth) are the only variables that have pearson correlation coefficient greater than 0.5. I will choose to fit a linear regression model with these two variables to predict birth weight. 
+
+```{r}
+proposed_model <- lm(bwt ~ bhead + blength, data = birthweight_df)
+```
+
+We can now plot model residual as a function of model prediction.
+```{r}
+# Get model predictions
+# Get model residuals
+# Plot line graph of model residual as a function of model prediction
+birthweight_df %>%
+  add_predictions(proposed_model) %>%
+  add_residuals(proposed_model) %>%
+  ggplot(aes(x = pred, y = resid)) +
+  geom_line() +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(
+    title = "Model Residual as a function of Model Prediction",
+    x = "Prediction",
+    y = "Residual"
+  )
+```
+After plotting the model residual as a function of model prediction, we see the model mostly underestimates birth weight for predicted values less than around 4.4 pounds. For predicted birth weights greater than 4.4 pounds, the residual tends to oscillate, splitting over and under zero.
+
+We can now get the cross-validated predicted error for our proposed model. Additionally, we can look at two other linear regression models: first with birth length and gestational age without interaction term and the second with head circumference at birth, birth length, sex, and all interaction terms.
+
+First we can create 100 80-20 training-test splits, then run of the three models on each of the 100 training data sets. Lastly, we will test each of the three models on each of the 100 training data and also calculate RMSE.
+```{r}
+crossvalidate_df <- crossv_mc(birthweight_df, 100) %>%
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  ) %>%
+  mutate(
+    proposed_model = map(train, ~lm(bwt ~ bhead + blength, data = .x)),
+    fit_one = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    fit_two = map(train, ~lm(bwt ~ bhead*blength*babysex, data = .x))
+  ) %>%
+  mutate(
+    rmse_proposed_model = map2_dbl(proposed_model, test, ~rmse(model = .x, data = .y)),
+    rmse_fit_one = map2_dbl(fit_one, test, ~rmse(model = .x, data = .y)),
+    rmse_fit_two = map2_dbl(fit_two, test, ~rmse(model = .x, data = .y))
+  )
+```
+
+
+We can now compare the root mean squared error of the three models with a boxplot.
+We will create a boxplot to visualize the distribution of RMSE for the 100 testing
+
+```{r}
+crossvalidate_df %>%
+  select(starts_with("rmse")) %>%
+  pivot_longer(everything(),
+               names_to = "model",
+               values_to = "rmse",
+               names_prefix = "rmse_") %>%
+  mutate(model = fct_inorder(model)) %>%
+  ggplot(aes(x = model, y = rmse)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(
+    x = "Model",
+    y = "RMSE",
+    title = "RMSE Distribution by Model"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+We see that our proposed model and the suggested model with predictors head circumference, birth length, sex, and all interaction terms have similar root mean squared error. However, the suggested model with predictors birth length and gestational age without interaction term has the highest root mean squared error among the three models.
