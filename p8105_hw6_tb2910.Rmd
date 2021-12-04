@@ -1,0 +1,17 @@
+---
+title: "Homework 6"
+author: "Teshawna Badu"
+date: 12/04/2021
+output: github_document
+---
+
+I'm an R Markdown document!
+
+```{r setup}
+library(tidyverse)
+library(readr)
+library(modelr)
+library(patchwork)
+```
+
+## Question 1 
